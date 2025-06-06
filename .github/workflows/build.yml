@@ -60,7 +60,6 @@ jobs:
         run: |
           make -j$(nproc) O=out \
             ARCH=arm64 \
-            LD=ld.lld \
             AS=llvm-as \
             AR=llvm-ar \
             NM=llvm-nm \
@@ -110,4 +109,4 @@ jobs:
           curl -F document=@Surya-Kernel-${{ env.BUILD_TIME }}.zip \
             -F caption="✅ Build Success with ZyC-Clang" \
             -F parse_mode=Markdown \
-            "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendDocument?chat_id=${{ env.TELEGRAM_CHAT_ID }}"
+            "https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendDocument?chat_id=${{ env.TELEGRAM_CHAT_ID}"
