@@ -1,4 +1,4 @@
-name: Build Kernel
+name: Build Kernel Manual Debug
 
 on:
   workflow_dispatch:
@@ -7,12 +7,10 @@ env:
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
   TZ: Asia/Jakarta
-  AK3_DIR: AnyKernel3
-  KERNELNAME: Surya-Kernel
 
 jobs:
   build:
-    name: Build Kernel Surya
+    name: Build Kernel Surya Manual
     runs-on: ubuntu-latest
 
     steps:
@@ -25,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc cpio flex bison libssl-dev ccache python-is-python3 git lz4 lld llvm zip
+          sudo apt install -y bc cpio flex bison libssl-dev ccache python-is-python3 git lz4 lld llvm
 
       - name: Clone Toolchains (Clang + GCC)
         run: |
@@ -33,47 +31,65 @@ jobs:
           git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
           git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
 
-      - name: Set build environment
+      - name: Export build environment variables
         run: |
-          echo "KERNEL_DEFCONFIG=surya_defconfig" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_USER=mahirooo" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_HOST=android-build" >> $GITHUB_ENV
-          echo "CLANG_PATH=$(pwd)/clang" >> $GITHUB_ENV
-          echo "GCC64_PATH=$(pwd)/gcc64" >> $GITHUB_ENV
-          echo "GCC32_PATH=$(pwd)/gcc32" >> $GITHUB_ENV
-          echo "CCACHE_DIR=$(pwd)/.ccache" >> $GITHUB_ENV
-          echo "BUILD_TIME=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
-          echo "PATH=$(pwd)/clang/bin:\$PATH" >> $GITHUB_ENV
+          export KERNEL_DEFCONFIG=surya_defconfig
+          export KBUILD_BUILD_USER=mahirooo
+          export KBUILD_BUILD_HOST=android-build
+          export CLANG_PATH=$(pwd)/clang
+          export GCC64_PATH=$(pwd)/gcc64
+          export GCC32_PATH=$(pwd)/gcc32
+          export CCACHE_DIR=$(pwd)/.ccache
+          export BUILD_TIME=$(date +%Y%m%d-%H%M)
+          echo "KERNEL_DEFCONFIG=$KERNEL_DEFCONFIG"
+          echo "KBUILD_BUILD_USER=$KBUILD_BUILD_USER"
+          echo "KBUILD_BUILD_HOST=$KBUILD_BUILD_HOST"
+          echo "CLANG_PATH=$CLANG_PATH"
+          echo "GCC64_PATH=$GCC64_PATH"
+          echo "GCC32_PATH=$GCC32_PATH"
+          echo "CCACHE_DIR=$CCACHE_DIR"
+          echo "BUILD_TIME=$BUILD_TIME"
+          # Save variables to GITHUB_ENV so next steps can use if needed
+          echo "KERNEL_DEFCONFIG=$KERNEL_DEFCONFIG" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_USER=$KBUILD_BUILD_USER" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=$KBUILD_BUILD_HOST" >> $GITHUB_ENV
+          echo "CLANG_PATH=$CLANG_PATH" >> $GITHUB_ENV
+          echo "GCC64_PATH=$GCC64_PATH" >> $GITHUB_ENV
+          echo "GCC32_PATH=$GCC32_PATH" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$CCACHE_DIR" >> $GITHUB_ENV
+          echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_ENV
 
       - name: Configure ccache
         run: |
-          export CCACHE_DIR=$CCACHE_DIR
+          export CCACHE_DIR=${{ env.CCACHE_DIR }}
           ccache -M 2G
           ccache -z
 
       - name: Notify Telegram - Build Started
         run: |
-          CLANG_VERSION=$(clang --version | head -n1)
-          curl -s -X POST https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage \
-            -d chat_id=${TELEGRAM_CHAT_ID} \
-            -d parse_mode=Markdown \
-            -d text="🚀 *Build Dimulai!*
-
-📦 *Kernel*: Surya Kernel
-🧠 *Clang*: \`${CLANG_VERSION}\`
-👤 *User*: \`${KBUILD_BUILD_USER}\`
-💻 *Host*: \`${KBUILD_BUILD_HOST}\`
-🕒 *Waktu*: $(TZ=Asia/Jakarta date +'%A, %d %B %Y %H:%M WIB')"
+          CLANG_VERSION=$($CLANG_PATH/bin/clang --version | head -n1)
+          curl -s -X POST https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage \
+            -d chat_id=${{ env.TELEGRAM_CHAT_ID }} \
+            -d text="🚀 *Build Dimulai!*\n🧠 *Clang*: $CLANG_VERSION\n🕒 $(TZ=Asia/Jakarta date)" \
+            -d parse_mode=Markdown
 
       - name: Set start time
         run: echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
 
       - name: Make defconfig
         run: |
-          make O=out ARCH=arm64 ${KERNEL_DEFCONFIG}
+          export KERNEL_DEFCONFIG=${{ env.KERNEL_DEFCONFIG }}
+          echo "Running make defconfig: $KERNEL_DEFCONFIG"
+          make O=out ARCH=arm64 $KERNEL_DEFCONFIG
 
       - name: Build kernel
         run: |
+          export PATH=${{ env.CLANG_PATH }}/bin:$PATH
+          export KBUILD_BUILD_USER=${{ env.KBUILD_BUILD_USER }}
+          export KBUILD_BUILD_HOST=${{ env.KBUILD_BUILD_HOST }}
+          export GCC64_PATH=${{ env.GCC64_PATH }}
+          export GCC32_PATH=${{ env.GCC32_PATH }}
+          echo "Start building kernel..."
           make -j$(nproc) O=out \
             ARCH=arm64 \
             CC=clang \
@@ -86,56 +102,47 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            READELF=llvm-readelf \
-            KBUILD_BUILD_USER=$KBUILD_BUILD_USER \
-            KBUILD_BUILD_HOST=$KBUILD_BUILD_HOST \
-            2>&1 | tee log.txt
+            READELF=llvm-readelf || { echo "Build failed! Check errors above."; exit 1; }
 
       - name: Check ccache stats
         run: ccache -s
 
-      - name: Check kernel output and create flashable zip
+      - name: Check kernel output
         run: |
-          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
-            echo -e "\n✅ Kernel compiled successfully! Creating flashable zip...\n"
-
-            rm -rf "${AK3_DIR}"
-            if [ -d "$AK3_DIR" ]; then
-              cp -r "$AK3_DIR" "${AK3_DIR}_backup"
-            else
-              git clone -q https://github.com/ardia-kun/AnyKernel3.git "$AK3_DIR" || exit 1
-            fi
-
-            cp out/arch/arm64/boot/Image.gz-dtb "${AK3_DIR}/Image"
-
-            cd "$AK3_DIR" || exit
-            zip -r9 "../${KERNELNAME}-${BUILD_TIME}.zip" * -x '*.git*' README.md *placeholder
-            cd ..
-
-            rm -rf "$AK3_DIR"
-          else
-            echo "❌ Kernel build failed: Image.gz-dtb not found!"
-            exit 1
-          fi
+          echo "Checking if kernel output files exist..."
+          test -f out/arch/arm64/boot/Image.gz || { echo "Image.gz missing!"; exit 1; }
+          test -f out/arch/arm64/boot/dtbo.img || { echo "dtbo.img missing!"; exit 1; }
 
       - name: Set duration
         run: |
           BUILD_END=$(date +%s)
-          echo "BUILD_DURATION=$((BUILD_END - $BUILD_START))" >> $GITHUB_ENV
+          BUILD_DURATION=$((BUILD_END - $BUILD_START))
+          echo "BUILD_DURATION=$BUILD_DURATION" >> $GITHUB_ENV
+          echo "Build duration: $BUILD_DURATION seconds"
 
-      - name: Notify Telegram - Build Failed
+      - name: Clone AnyKernel3 and package
+        if: success()
+        run: |
+          git clone --depth=1 https://github.com/rinnsakaguchi/AnyKernel3 -b FSociety
+          cp out/arch/arm64/boot/Image.gz AnyKernel3/
+          cp out/arch/arm64/boot/dtbo.img AnyKernel3/
+          [ -f out/arch/arm64/boot/dtb.img ] && cp out/arch/arm64/boot/dtb.img AnyKernel3/
+          cd AnyKernel3
+          zip -r9 ../Surya-Kernel-${{ env.BUILD_TIME }}.zip ./*
+
+      - name: Send Telegram - Success
+        if: success()
+        run: |
+          curl -F document=@Surya-Kernel-${{ env.BUILD_TIME }}.zip \
+            -F caption="✅ *Build Berhasil!*\n📦 Output: Surya-Kernel-${{ env.BUILD_TIME }}.zip\n🕒 Durasi: $(( ${{ env.BUILD_DURATION }} / 60 ))m $(( ${{ env.BUILD_DURATION }} % 60 ))s" \
+            -F parse_mode=Markdown \
+            https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendDocument?chat_id=${{ env.TELEGRAM_CHAT_ID }}
+
+      - name: Send Telegram - Build Failed
         if: failure()
         run: |
-          curl -s -X POST https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument \
-            -F chat_id=${TELEGRAM_CHAT_ID} \
+          curl -s -X POST https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendDocument \
+            -F chat_id=${{ env.TELEGRAM_CHAT_ID }} \
             -F document=@log.txt \
             -F caption="❌ *Build Gagal!*\nLihat log berikut." \
             -F parse_mode=Markdown
-
-      - name: Send Telegram - Build Success
-        if: success()
-        run: |
-          curl -F document=@${KERNELNAME}-${BUILD_TIME}.zip \
-            -F caption="✅ *Build Berhasil!*\n📦 Output: ${KERNELNAME}-${BUILD_TIME}.zip\n🕒 Durasi: $(( $BUILD_DURATION / 60 ))m $(( $BUILD_DURATION % 60 ))s" \
-            -F parse_mode=Markdown \
-            https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument?chat_id=${TELEGRAM_CHAT_ID}
