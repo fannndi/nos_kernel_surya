@@ -55,7 +55,6 @@ jobs:
 
       - name: Clone Toolchains in parallel
         run: |
-          # Only clone if folder missing
           [[ -d clang ]] || git clone --depth=1 -b clang-21.0 https://gitlab.com/kutemeikito/rastamod69-clang clang &
           [[ -d gcc64 ]] || git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64 &
           [[ -d gcc32 ]] || git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32 &
@@ -136,7 +135,7 @@ jobs:
             CROSS_COMPILE=$GCC64_PATH/bin/aarch64-linux-android- \
             CROSS_COMPILE_COMPAT=$GCC32_PATH/bin/arm-linux-androideabi- \
             LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip READELF=llvm-readelf \
-            2>&1 | tee build.log
+            2>&1 | tee log.txt
           echo "::set-output name=status::0"
 
       - name: Check build result
@@ -186,15 +185,16 @@ jobs:
             -F parse_mode=Markdown \
             https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendDocument?chat_id=${{ env.TELEGRAM_CHAT_ID }}
 
+      - name: Check log.txt existence before upload on failure
+        if: failure()
+        run: |
+          echo "Checking if log.txt exists..."
+          ls -lh log.txt || echo "log.txt not found!"
+
       - name: Send Telegram - Build Failed with log file
         if: failure()
         run: |
-          curl -s -X POST https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage \
-            -d chat_id=${{ env.TELEGRAM_CHAT_ID }} \
-            -d text="❌ *Build Gagal!*\nLog terlampir." \
-            -d parse_mode=Markdown
-
-          curl -F document=@build.log \
-            -F caption="📄 Log Build Gagal\n🕒 $(TZ=Asia/Jakarta date)" \
+          curl -F document=@log.txt \
+            -F caption="❌ *Build Gagal!*\n📄 Log terlampir.\n🕒 $(TZ=Asia/Jakarta date)" \
             -F parse_mode=Markdown \
             https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendDocument?chat_id=${{ env.TELEGRAM_CHAT_ID }}
