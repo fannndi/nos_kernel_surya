@@ -7,6 +7,8 @@ env:
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
   TZ: Asia/Jakarta
+  AK3_DIR: AnyKernel3
+  KERNELNAME: Surya-Kernel
 
 jobs:
   build:
@@ -23,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc cpio flex bison libssl-dev ccache python-is-python3 git lz4 lld llvm
+          sudo apt install -y bc cpio flex bison libssl-dev ccache python-is-python3 git lz4 lld llvm zip
 
       - name: Clone Toolchains (Clang + GCC)
         run: |
@@ -52,8 +54,6 @@ jobs:
       - name: Notify Telegram - Build Started
         run: |
           CLANG_VERSION=$(clang --version | head -n1)
-          COMMIT_ID=$(git log --oneline -n1 | cut -d ' ' -f1)
-          COMMIT_MSG=$(git log --oneline -n1 | cut -d ' ' -f2-)
           curl -s -X POST https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage \
             -d chat_id=${TELEGRAM_CHAT_ID} \
             -d parse_mode=Markdown \
@@ -63,7 +63,6 @@ jobs:
 🧠 *Clang*: \`${CLANG_VERSION}\`
 👤 *User*: \`${KBUILD_BUILD_USER}\`
 💻 *Host*: \`${KBUILD_BUILD_HOST}\`
-🔀 *Commit*: \`${COMMIT_ID}\` - ${COMMIT_MSG}
 🕒 *Waktu*: $(TZ=Asia/Jakarta date +'%A, %d %B %Y %H:%M WIB')"
 
       - name: Set start time
@@ -95,10 +94,29 @@ jobs:
       - name: Check ccache stats
         run: ccache -s
 
-      - name: Check kernel output
+      - name: Check kernel output and create flashable zip
         run: |
-          test -f out/arch/arm64/boot/Image.gz || exit 1
-          test -f out/arch/arm64/boot/dtbo.img || exit 1
+          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
+            echo -e "\n✅ Kernel compiled successfully! Creating flashable zip...\n"
+
+            rm -rf "${AK3_DIR}"
+            if [ -d "$AK3_DIR" ]; then
+              cp -r "$AK3_DIR" "${AK3_DIR}_backup"
+            else
+              git clone -q https://github.com/ardia-kun/AnyKernel3.git "$AK3_DIR" || exit 1
+            fi
+
+            cp out/arch/arm64/boot/Image.gz-dtb "${AK3_DIR}/Image"
+
+            cd "$AK3_DIR" || exit
+            zip -r9 "../${KERNELNAME}-${BUILD_TIME}.zip" * -x '*.git*' README.md *placeholder
+            cd ..
+
+            rm -rf "$AK3_DIR"
+          else
+            echo "❌ Kernel build failed: Image.gz-dtb not found!"
+            exit 1
+          fi
 
       - name: Set duration
         run: |
@@ -114,20 +132,10 @@ jobs:
             -F caption="❌ *Build Gagal!*\nLihat log berikut." \
             -F parse_mode=Markdown
 
-      - name: Clone AnyKernel3 and package
+      - name: Send Telegram - Build Success
         if: success()
         run: |
-          git clone --depth=1 https://github.com/rinnsakaguchi/AnyKernel3 -b FSociety
-          cp out/arch/arm64/boot/Image.gz AnyKernel3/
-          cp out/arch/arm64/boot/dtbo.img AnyKernel3/
-          [ -f out/arch/arm64/boot/dtb.img ] && cp out/arch/arm64/boot/dtb.img AnyKernel3/
-          cd AnyKernel3
-          zip -r9 ../Surya-Kernel-${BUILD_TIME}.zip ./*
-
-      - name: Send Telegram - Success
-        if: success()
-        run: |
-          curl -F document=@Surya-Kernel-${BUILD_TIME}.zip \
-            -F caption="✅ *Build Berhasil!*\n📦 Output: Surya-Kernel-${BUILD_TIME}.zip\n🕒 Durasi: $(( $BUILD_DURATION / 60 ))m $(( $BUILD_DURATION % 60 ))s" \
+          curl -F document=@${KERNELNAME}-${BUILD_TIME}.zip \
+            -F caption="✅ *Build Berhasil!*\n📦 Output: ${KERNELNAME}-${BUILD_TIME}.zip\n🕒 Durasi: $(( $BUILD_DURATION / 60 ))m $(( $BUILD_DURATION % 60 ))s" \
             -F parse_mode=Markdown \
             https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument?chat_id=${TELEGRAM_CHAT_ID}
