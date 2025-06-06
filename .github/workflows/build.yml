@@ -14,39 +14,44 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set timezone & dependencies
-        run: |
-          sudo ln -sf /usr/share/zoneinfo/$TZ /etc/localtime
-          sudo apt update
-          sudo apt install -y build-essential ccache bc cpio flex bison git python-is-python3 lz4 libssl-dev lld
+      - name: Set timezone
+        run: sudo ln -sf /usr/share/zoneinfo/$TZ /etc/localtime
 
       - name: Checkout source
         uses: actions/checkout@v3
 
-      - name: Clone ZyC Clang
+      - name: Install dependencies
         run: |
-          curl -L -o clang.tar.gz https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20250129-release/Clang-20.0.0git-20250129.tar.gz
-          mkdir -p zyc-clang && tar -xf clang.tar.gz -C zyc-clang --strip-components=1
-          ln -sf $(pwd)/zyc-clang/bin/ld.lld $(pwd)/zyc-clang/bin/ld
+          sudo apt update
+          sudo apt install -y bc cpio flex bison libssl-dev ccache python-is-python3 git lz4
 
-      - name: Setup environment
+      - name: Clone Toolchains (Clang + GCC)
+        run: |
+          git clone --depth=1 -b clang-21.0 https://gitlab.com/kutemeikito/rastamod69-clang clang
+          git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc64
+          git clone --depth=1 -b lineage-19.1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc32
+
+      - name: Set build environment
         run: |
           echo "KERNEL_DEFCONFIG=surya_defconfig" >> $GITHUB_ENV
           echo "KBUILD_BUILD_USER=mahirooo" >> $GITHUB_ENV
           echo "KBUILD_BUILD_HOST=android-build" >> $GITHUB_ENV
-          echo "TOOLCHAIN=${{ github.workspace }}/zyc-clang" >> $GITHUB_ENV
-          echo "CCACHE_DIR=${{ github.workspace }}/.ccache" >> $GITHUB_ENV
+          echo "CLANG_PATH=$(pwd)/clang" >> $GITHUB_ENV
+          echo "GCC64_PATH=$(pwd)/gcc64" >> $GITHUB_ENV
+          echo "GCC32_PATH=$(pwd)/gcc32" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$(pwd)/.ccache" >> $GITHUB_ENV
           echo "BUILD_TIME=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
-          echo "${{ github.workspace }}/zyc-clang/bin:/usr/lib/ccache:${PATH}" >> $GITHUB_PATH
+          echo "$(pwd)/clang/bin" >> $GITHUB_PATH
 
-      - name: Setup ccache
+      - name: Configure ccache
         run: |
+          export CCACHE_DIR=$CCACHE_DIR
           ccache -M 2G
           ccache -z
 
       - name: Notify Telegram - Build Started
         run: |
-          CLANG_VERSION=$($TOOLCHAIN/bin/clang --version | head -n 1)
+          CLANG_VERSION=$(clang/bin/clang --version | head -n1)
           curl -s -X POST https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage \
             -d chat_id=${TELEGRAM_CHAT_ID} \
             -d text="🚀 *Build Dimulai!*\n🧠 *Clang*: $CLANG_VERSION\n🕒 $(TZ=Asia/Jakarta date)" \
@@ -61,12 +66,20 @@ jobs:
 
       - name: Build kernel
         run: |
+          export PATH=$CLANG_PATH/bin:$PATH
           make -j$(nproc) O=out \
-            ARCH=arm64 LLVM=1 LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
+            ARCH=arm64 \
             CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=$GCC64_PATH/bin/aarch64-linux-android- \
+            CROSS_COMPILE_COMPAT=$GCC32_PATH/bin/arm-linux-androideabi- \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            READELF=llvm-readelf \
             KBUILD_BUILD_USER=$KBUILD_BUILD_USER \
             KBUILD_BUILD_HOST=$KBUILD_BUILD_HOST \
             2>&1 | tee log.txt
@@ -93,7 +106,7 @@ jobs:
             -F caption="❌ *Build Gagal!*\nLihat log berikut." \
             -F parse_mode=Markdown
 
-      - name: Clone AnyKernel3 & package
+      - name: Clone AnyKernel3 and package
         if: success()
         run: |
           git clone --depth=1 https://github.com/rinnsakaguchi/AnyKernel3 -b FSociety
@@ -103,7 +116,7 @@ jobs:
           cd AnyKernel3
           zip -r9 ../Surya-Kernel-${BUILD_TIME}.zip ./*
 
-      - name: Notify Telegram - Success
+      - name: Send Telegram - Success
         if: success()
         run: |
           curl -F document=@Surya-Kernel-${BUILD_TIME}.zip \
