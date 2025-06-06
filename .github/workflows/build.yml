@@ -14,35 +14,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set timezone
-        run: sudo ln -sf /usr/share/zoneinfo/$TZ /etc/localtime
+      - name: Set timezone & dependencies
+        run: |
+          sudo ln -sf /usr/share/zoneinfo/$TZ /etc/localtime
+          sudo apt update
+          sudo apt install -y build-essential ccache bc cpio flex bison git python-is-python3 lz4 libssl-dev lld
 
       - name: Checkout source
         uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y ccache bc cpio flex bison git python-is-python3 lz4 libssl-dev
 
       - name: Clone ZyC Clang
         run: |
           curl -L -o clang.tar.gz https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20250129-release/Clang-20.0.0git-20250129.tar.gz
           mkdir -p zyc-clang && tar -xf clang.tar.gz -C zyc-clang --strip-components=1
+          ln -sf $(pwd)/zyc-clang/bin/ld.lld $(pwd)/zyc-clang/bin/ld
 
-      - name: Configure build env
+      - name: Setup environment
         run: |
           echo "KERNEL_DEFCONFIG=surya_defconfig" >> $GITHUB_ENV
           echo "KBUILD_BUILD_USER=mahirooo" >> $GITHUB_ENV
           echo "KBUILD_BUILD_HOST=android-build" >> $GITHUB_ENV
-          echo "TOOLCHAIN=$(pwd)/zyc-clang" >> $GITHUB_ENV
-          echo "PATH=$(pwd)/zyc-clang/bin:/usr/lib/ccache:$PATH" >> $GITHUB_ENV
-          echo "CCACHE_DIR=$(pwd)/.ccache" >> $GITHUB_ENV
+          echo "TOOLCHAIN=${{ github.workspace }}/zyc-clang" >> $GITHUB_ENV
+          echo "CCACHE_DIR=${{ github.workspace }}/.ccache" >> $GITHUB_ENV
           echo "BUILD_TIME=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
+          echo "${{ github.workspace }}/zyc-clang/bin:/usr/lib/ccache:${PATH}" >> $GITHUB_PATH
 
-      - name: Configure ccache
+      - name: Setup ccache
         run: |
-          export CCACHE_DIR=$CCACHE_DIR
           ccache -M 2G
           ccache -z
 
@@ -61,23 +59,20 @@ jobs:
         run: |
           make O=out ARCH=arm64 ${KERNEL_DEFCONFIG}
 
-      - name: Build kernel with ccache
+      - name: Build kernel
         run: |
           make -j$(nproc) O=out \
-            ARCH=arm64 \
-            LLVM=1 LLVM_IAS=1 \
+            ARCH=arm64 LLVM=1 LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CC=clang \
-            KBUILD_COMPILER_STRING=$TOOLCHAIN \
             KBUILD_BUILD_USER=$KBUILD_BUILD_USER \
             KBUILD_BUILD_HOST=$KBUILD_BUILD_HOST \
             2>&1 | tee log.txt
 
       - name: Check ccache stats
-        run: |
-          ccache -s
+        run: ccache -s
 
       - name: Check kernel output
         run: |
@@ -98,7 +93,7 @@ jobs:
             -F caption="❌ *Build Gagal!*\nLihat log berikut." \
             -F parse_mode=Markdown
 
-      - name: Clone AnyKernel3 and package
+      - name: Clone AnyKernel3 & package
         if: success()
         run: |
           git clone --depth=1 https://github.com/rinnsakaguchi/AnyKernel3 -b FSociety
@@ -108,7 +103,7 @@ jobs:
           cd AnyKernel3
           zip -r9 ../Surya-Kernel-${BUILD_TIME}.zip ./*
 
-      - name: Send Telegram - Success
+      - name: Notify Telegram - Success
         if: success()
         run: |
           curl -F document=@Surya-Kernel-${BUILD_TIME}.zip \
