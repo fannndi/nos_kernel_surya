@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc cpio flex bison libssl-dev ccache python-is-python3 git lz4
+          sudo apt install -y bc cpio flex bison libssl-dev ccache python-is-python3 git lz4 lld llvm
 
       - name: Clone Toolchains (Clang + GCC)
         run: |
@@ -41,7 +41,7 @@ jobs:
           echo "GCC32_PATH=$(pwd)/gcc32" >> $GITHUB_ENV
           echo "CCACHE_DIR=$(pwd)/.ccache" >> $GITHUB_ENV
           echo "BUILD_TIME=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
-          echo "$(pwd)/clang/bin" >> $GITHUB_PATH
+          echo "PATH=$(pwd)/clang/bin:\$PATH" >> $GITHUB_ENV
 
       - name: Configure ccache
         run: |
@@ -51,11 +51,20 @@ jobs:
 
       - name: Notify Telegram - Build Started
         run: |
-          CLANG_VERSION=$(clang/bin/clang --version | head -n1)
+          CLANG_VERSION=$(clang --version | head -n1)
+          COMMIT_ID=$(git log --oneline -n1 | cut -d ' ' -f1)
+          COMMIT_MSG=$(git log --oneline -n1 | cut -d ' ' -f2-)
           curl -s -X POST https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage \
             -d chat_id=${TELEGRAM_CHAT_ID} \
-            -d text="🚀 *Build Dimulai!*\n🧠 *Clang*: $CLANG_VERSION\n🕒 $(TZ=Asia/Jakarta date)" \
-            -d parse_mode=Markdown
+            -d parse_mode=Markdown \
+            -d text="🚀 *Build Dimulai!*
+
+📦 *Kernel*: Surya Kernel
+🧠 *Clang*: \`${CLANG_VERSION}\`
+👤 *User*: \`${KBUILD_BUILD_USER}\`
+💻 *Host*: \`${KBUILD_BUILD_HOST}\`
+🔀 *Commit*: \`${COMMIT_ID}\` - ${COMMIT_MSG}
+🕒 *Waktu*: $(TZ=Asia/Jakarta date +'%A, %d %B %Y %H:%M WIB')"
 
       - name: Set start time
         run: echo "BUILD_START=$(date +%s)" >> $GITHUB_ENV
@@ -66,7 +75,6 @@ jobs:
 
       - name: Build kernel
         run: |
-          export PATH=$CLANG_PATH/bin:$PATH
           make -j$(nproc) O=out \
             ARCH=arm64 \
             CC=clang \
