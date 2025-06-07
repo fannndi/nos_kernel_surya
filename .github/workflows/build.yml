@@ -61,7 +61,7 @@ jobs:
           
       - name: Build Kernel
         run: |
-          export KBUILD_CFLAGS="-Wno-default-const-init-var-unsafe"
+          export KCFLAGS="-Wno-default-const-init-var-unsafe -Wno-dangling-pointer"
           make -j$(nproc) O=out \
             ARCH=arm64 \
             LD=ld.lld \
