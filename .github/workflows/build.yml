@@ -62,8 +62,6 @@ jobs:
 
       - name: Build Kernel
         run: |
-          export PATH=${TOOLCHAIN}/bin:$PATH
-          CLANG_VER=$(${TOOLCHAIN}/bin/clang --version | head -n 1)
           make -j$(nproc) O=out \
             ARCH=arm64 \
             LD=ld.lld \
