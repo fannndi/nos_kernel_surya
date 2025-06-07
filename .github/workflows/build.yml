@@ -21,10 +21,28 @@ jobs:
           echo "BUILD_TIME=$(TZ=Asia/Jakarta date '+%d%m%Y-%H%M')" >> $GITHUB_ENV
           sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
 
-      - name: Install Dependencies
+      - name: Setup Dependencies
         run: |
           sudo apt update -y
-          sudo apt install -y bc cpio flex bison aptitude git python-is-python3 tar perl wget curl lz4 device-tree-compiler libssl-dev
+          sudo apt install -y \
+            bc bison flex cpio rsync zip \
+            build-essential libssl-dev \
+            libelf-dev libncurses5-dev libffi-dev \
+            clang llvm lld gcc g++ \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            python-is-python3 python3 python2 \
+            curl wget git zstd lz4 pigz jq git-lfs ccache unzip
+
+      - name: Build OpenSSL 1.1.1
+        run: |
+          mkdir -p $HOME/openssl-1.1.1-install && cd $HOME
+          wget https://www.openssl.org/source/old/1.1.1/openssl-1.1.1.tar.gz
+          tar -xzvf openssl-1.1.1.tar.gz && cd openssl-1.1.1
+          ./config --prefix=$HOME/openssl-1.1.1-install shared zlib
+          make -j$(nproc) && make install
+          echo "$HOME/openssl-1.1.1-install/lib" | sudo tee /etc/ld.so.conf.d/openssl-1.1.1.conf
+          sudo ldconfig
+          echo "$HOME/openssl-1.1.1-install/bin" >> $GITHUB_PATH
 
       - name: Clone ZyC Clang
         run: |
@@ -42,7 +60,8 @@ jobs:
 
       - name: Send Telegram Notification - Build Started
         run: |
-          CLANG_VER=$(./zyc-clang/bin/clang --version | head -n 1)
+          CLANG_VER=$(${{ env.TOOLCHAIN }}/bin/clang --version | head -n 1)
+          echo "CLANG_VER=${CLANG_VER}" >> $GITHUB_ENV
           curl -s -X POST https://api.telegram.org/bot${{ env.TELEGRAM_BOT_TOKEN }}/sendMessage \
             -d chat_id=${{ env.TELEGRAM_CHAT_ID }} \
             -d text="🚀 *Build Dimulai!* | *Clang*: ${CLANG_VER}" \
@@ -64,7 +83,7 @@ jobs:
         run: |
           make -j$(nproc) O=out \
             ARCH=arm64 \
-            LD=ld.lld \
+            LD=/usr/bin/ld.lld \
             AS=llvm-as \
             AR=llvm-ar \
             NM=llvm-nm \
